@@ -536,13 +536,12 @@ analysis_output=""
 selected_index=0
 first_render=true
 
-# Terminal will be reset for clean display
-
 while true; do
     # JIRA-only mode: skip commit message generation
     if [[ "$JIRA_ONLY_MODE" == "true" ]]; then
         # Show JIRA-only menu
-        tput reset
+        tput rc
+        tput ed
 
         echo "================================================"
         echo "🎯 JIRA Tools Menu - $JIRA_TICKET"
@@ -555,8 +554,6 @@ while true; do
         echo "================================================"
 
         read -rsn1 key
-        # Flush any remaining input
-        read -t 0.01 -n 100 discard 2>/dev/null || true
 
         if [[ "$key" == "p" || "$key" == "P" ]]; then
             tput cnorm
@@ -755,8 +752,10 @@ while true; do
     fi
 
     # --- RENDER MENU ---
-    # Clear screen and redraw
-    tput reset
+    # Clear screen and redraw (skip on first render)
+    if [[ "$first_render" != "true" ]]; then
+        clear
+    fi
 
     echo "------------------------------------------------"
     echo "Select a commit message (↑/↓ to move, Enter to select):"
@@ -798,8 +797,6 @@ while true; do
     # --- READ INPUT ---
     # Read 1 character silently
     read -rsn1 key
-    # Flush any remaining input
-    read -t 0.01 -n 100 discard 2>/dev/null || true
 
     # Handle Escape Sequences for Arrow Keys
     if [[ "$key" == $'\x1b' ]]; then
