@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # 0. Check for cursor-agent
@@ -452,7 +453,7 @@ show_spinner() {
 # Function to generate messages
 generate_messages() {
     local feedback="$1"
-
+    
     ai_msg="👀 Analyzing changes with AI (grok-code-fast-1)..."
     echo -n "$ai_msg" >&2
     # Append to analysis output for redrawing
@@ -463,9 +464,9 @@ generate_messages() {
     fi
 
     local system_prompt="ROLE: Git Commit Message Generator.
-
+    
     TASK: Analyze the provided git diff and file statistics. Identify the SINGLE most appropriate Conventional Commit type and intent. Then, generate 5 variations of that SAME message with different phrasing.
-
+    
     CONTEXT:
     - Branch: ${BRANCH_NAME}
     - Project: ${REPO_NAME}
@@ -724,7 +725,7 @@ while true; do
     # Normal mode: Generate commit messages if needed
     if [[ "$refresh_needed" == "true" ]]; then
         raw_output=$(generate_messages "$current_feedback")
-
+        
         # Parse output into array
         current_options=()
         while IFS= read -r line; do
@@ -742,19 +743,28 @@ while true; do
                 current_options+=("$clean_line")
             fi
         done <<< "$raw_output"
-
+        
         if [[ ${#current_options[@]} -eq 0 ]]; then
              current_options+=("Error: AI returned invalid format. Please try refining.")
         fi
-
+        
         refresh_needed=false
         selected_index=0
     fi
 
     # --- RENDER MENU ---
-    # Clear screen and redraw (skip on first render)
+    # Determine height of the menu to redraw cleanly
+    # Header: 3 lines
+    # Footer: 3 lines
+    # Options: ${#current_options[@]} lines
+    # Total lines = 3 + 3 + options
+    menu_height=$((3 + 3 + ${#current_options[@]}))
+
+    # On first render, just clear screen or print normally
+    # On subsequent renders, move cursor up by menu_height before printing
     if [[ "$first_render" != "true" ]]; then
-        clear
+        tput cuu "$menu_height" # Move cursor UP
+        tput ed                 # Clear from cursor to end of screen
     fi
 
     echo "------------------------------------------------"
@@ -773,10 +783,10 @@ while true; do
 
         if [[ $idx -eq $selected_index ]]; then
             # Highlighted Row (Reverse video)
-            echo -e "\033[7m -> ${base_color}${opt}\033[0m"
+            printf "\033[7m -> ${base_color}${opt}\033[0m\n"
         else
             # Normal Row
-            echo -e "    ${base_color}${opt}\033[0m"
+            printf "    ${base_color}${opt}\033[0m\n"
         fi
         ((idx++))
     done
@@ -786,7 +796,7 @@ while true; do
     if [[ -n "$JIRA_TICKET" ]]; then
         pr_menu="  [p] PR Desc  [f] JIRA Fields"
     fi
-    echo -e " [Enter] Commit  [e] Edit  [c] Copy  [d] Diff  [r] Refine$pr_menu  [?] Help  [q] Quit"
+    printf " [Enter] Commit  [e] Edit  [c] Copy  [d] Diff  [r] Refine$pr_menu  [?] Help  [q] Quit\n"
     echo "------------------------------------------------"
 
     # Mark first render as complete
@@ -837,13 +847,13 @@ while true; do
             rm "$temp_msg_file"
             
             if [[ -n "$MSG_TO_COMMIT" ]]; then
-                echo ""
+            echo ""
                 echo -e "\033[1;36m✓ Edited:\033[0m $MSG_TO_COMMIT"
                 read -p "  Skip pre-commit hooks (--no-verify)? [y/N]: " no_verify_flag < /dev/tty
                 flags=""
                 [[ "$no_verify_flag" =~ ^[Yy]$ ]] && flags="--no-verify"
                 git commit -m "$MSG_TO_COMMIT" $flags
-                exit 0
+            exit 0
             fi
         else
             echo "❌ nvim not found."
