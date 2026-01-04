@@ -1,0 +1,175 @@
+#!/bin/bash
+
+# 0. Check for gemini
+if ! command -v gemini >/dev/null 2>&1; then
+    echo "❌ 'gemini' CLI is not installed. Please install it first."
+    exit 1
+fi
+
+# 1. Check for git repo
+if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    echo "❌ Not a git repository."
+    exit 1
+fi
+
+# 2. Get staged changes
+DIFF=$(git diff --cached)
+
+if [[ -z "$DIFF" ]]; then
+    echo "⚠️  No staged changes found. Did you 'git add'?"
+    exit 0
+fi
+
+# 3. Get Branch Name
+# We try to get the branch name, suppressing all errors.
+BRANCH_NAME=$(git branch --show-current 2>/dev/null)
+if [[ -z "$BRANCH_NAME" ]]; then
+    BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+fi
+# If it's still empty or "HEAD" (detached), and we can't find a ref, default to 'initial'
+if [[ -z "$BRANCH_NAME" || "$BRANCH_NAME" == "HEAD" ]]; then
+    BRANCH_NAME="initial"
+fi
+
+# 4. Get repo context for better prompts
+REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "project")
+
+# Function to generate messages
+generate_messages() {
+    local feedback="$1"
+    
+    echo -e "👀 Analyzing git diff with Gemini..." >&2
+    
+    # DEBUG: Show the user what we are sending!
+    echo -e "\n--- DIFF PREVIEW (First 10 lines) ---" >&2
+    echo "$DIFF" | head -n 10 >&2
+    echo "--- END PREVIEW ---\n" >&2
+
+    local system_prompt="ROLE: Git Commit Message Generator.
+    
+    TASK: Analyze the provided git diff. Identify the SINGLE most appropriate Conventional Commit type and intent. Then, generate 5 variations of that SAME message with different phrasing.
+
+    CONTEXT:
+    - Branch: ${BRANCH_NAME}
+    - Project: ${REPO_NAME}
+
+    STRICT OUTPUT RULES:
+    1. Output ONLY 5 lines of text. No markdown.
+    2. Format: <type>: [${BRANCH_NAME}]: <description>
+    3. All 5 options should ideally have the SAME type (e.g., if it's a fix, all 5 should be 'fix').
+    4. Vary the phrasing (e.g., 'fix: handle null', 'fix: prevent crash', 'fix: add null check').
+
+    CONTENT GUIDELINES:
+    - Focus on the ACTUAL code changes in the diff.
+    - Use imperative mood ('add' not 'added').
+    - Do NOT hallucinate features not in the diff.
+
+    TEMPLATE:
+    <type>: [${BRANCH_NAME}]: <phrasing option 1>
+    <type>: [${BRANCH_NAME}]: <phrasing option 2>
+    "
+
+    if [[ -n "$feedback" ]]; then
+        system_prompt="$system_prompt\n\nUSER FEEDBACK: $feedback\n(Refine the messages based on this feedback)"
+    fi
+
+    # Create temp file for the prompt
+    local prompt_file=$(mktemp)
+    
+    echo "$system_prompt" > "$prompt_file"
+    echo -e "\n\nGIT DIFF TO ANALYZE:\n" >> "$prompt_file"
+    echo "$DIFF" >> "$prompt_file"
+    
+    # Run gemini
+    # We use 'cat' to pipe stdin. 
+    local err_file=$(mktemp)
+    
+    cat "$prompt_file" | gemini > "$err_file" 2>&1
+    
+    # Capture output. The gemini tool might output mixed stdout/stderr or use colors/spinners.
+    # We assume standard output behavior for now.
+    cat "$err_file"
+    
+    rm "$prompt_file" "$err_file"
+}
+
+# State variables
+current_feedback=""
+refresh_needed=true
+declare -a current_options
+
+# 4. Interaction Loop
+while true; do
+    # Generate if needed
+    if [[ "$refresh_needed" == "true" ]]; then
+        raw_output=$(generate_messages "$current_feedback")
+        
+        # Parse output into array
+        current_options=()
+        while IFS= read -r line; do
+            # 1. Clean whitespace
+            clean_line=$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            
+            # 2. Remove numbering (1., 1), - )
+            clean_line=$(echo "$clean_line" | sed -E 's/^[0-9]+[\.\)\-]?[[:space:]]*//')
+            
+            # 3. Remove markdown
+            clean_line=$(echo "$clean_line" | sed -E 's/`//g')
+
+            # 4. STRICT FILTER: Line must start with a valid type
+            if [[ "$clean_line" =~ ^(feat|fix|chore|docs|refactor|style|perf|test|ci|build)(\(.*\))?: ]]; then
+                current_options+=("$clean_line")
+            fi
+        done <<< "$raw_output"
+        
+        # Fallback if no valid options found (model failed completely)
+        if [[ ${#current_options[@]} -eq 0 ]]; then
+             current_options+=("Error: Model returned invalid format. Raw output:")
+             current_options+=("$(echo "$raw_output" | head -n 1)") 
+        fi
+        
+        refresh_needed=false
+    fi
+
+    echo "------------------------------------------------"
+    echo "Select a commit message for branch '$BRANCH_NAME':"
+    echo "------------------------------------------------"
+
+    # Display Options
+    i=1
+    for opt in "${current_options[@]}"; do
+        echo -e "\033[1;34m$i)\033[0m $opt"
+        ((i++))
+    done
+
+    echo "------------------------------------------------"
+    echo -e "\033[1;33mr)\033[0m Refine / Give Feedback"
+    echo -e "\033[1;31mq)\033[0m Quit"
+    echo "------------------------------------------------"
+    
+    read -p "Choice: " choice < /dev/tty
+
+    if [[ "$choice" =~ ^[0-9]+$ ]]; then
+        # User selected a number
+        index=$((choice - 1))
+        if [[ $index -ge 0 && $index -lt ${#current_options[@]} ]]; then
+            SELECTED_MSG="${current_options[$index]}"
+            echo ""
+            echo "✅ Committing with: $SELECTED_MSG"
+            git commit -m "$SELECTED_MSG"
+            exit 0
+        else
+            echo "⚠️  Invalid number."
+        fi
+    elif [[ "$choice" == "r" || "$choice" == "R" ]]; then
+        echo ""
+        read -p "Enter instructions to improve suggestions: " user_input < /dev/tty
+        current_feedback="$user_input"
+        refresh_needed=true
+    elif [[ "$choice" == "q" || "$choice" == "Q" ]]; then
+        echo "❌ Cancelled."
+        exit 0
+    else
+        echo "⚠️  Invalid key."
+    fi
+done
