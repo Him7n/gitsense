@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # 0. Check for cursor-agent
@@ -37,14 +36,7 @@ extract_jira_ticket() {
 JIRA_TICKET=$(extract_jira_ticket "$BRANCH_NAME")
 
 # 4. Get staged changes only (what will actually be committed)
-# Check if there are any tracked modified files
-TRACKED_MODIFIED=$(git diff --name-only 2>/dev/null)
-
-if [[ -n "$TRACKED_MODIFIED" ]]; then
-    # Auto-stage all tracked modified files
-    git add -u 2>/dev/null
-fi
-
+# Note: User must manually stage files before running this script
 COMMIT_DIFF=$(git diff --cached -U5 2>/dev/null)
 COMMIT_STAT=$(git diff --cached --stat 2>/dev/null)
 CHANGE_TYPE="staged"
