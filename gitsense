@@ -136,7 +136,7 @@ $branch_diff
 "
 
     # Generate using cursor-agent
-    local pr_title=$(echo "$pr_title_prompt" | cursor-agent --model grok-code-fast-1 --print --trust 2>/dev/null)
+    local pr_title=$(echo "$pr_title_prompt" | cursor-agent --model sonnet-4.5 --print -f 2>/dev/null)
 
     # Clean up output - extract just the title line
     pr_title=$(echo "$pr_title" | grep "^\[$ticket_id\]" | head -1)
@@ -304,7 +304,7 @@ $(echo "$branch_diff" | head -n 500)
 "
 
     # Generate using cursor-agent
-    local pr_output=$(echo "$pr_prompt" | cursor-agent --model grok-code-fast-1 --print --trust 2>/dev/null)
+    local pr_output=$(echo "$pr_prompt" | cursor-agent --model sonnet-4.5 --print -f 2>/dev/null)
 
     # Clean up output
     pr_output=$(echo "$pr_output" | sed 's/```markdown//g' | sed 's/```//g')
@@ -423,7 +423,7 @@ Changes Made:
 $branch_diff
 "
 
-    local output=$(echo "$full_prompt" | cursor-agent --model grok-code-fast-1 --print --trust 2>/dev/null)
+    local output=$(echo "$full_prompt" | cursor-agent --model sonnet-4.5 --print -f 2>/dev/null)
     echo "$output"
 }
 
@@ -446,7 +446,7 @@ show_spinner() {
 generate_messages() {
     local feedback="$1"
     
-    ai_msg="👀 Analyzing changes with AI (grok-code-fast-1)..."
+    ai_msg="👀 Analyzing changes with AI (sonnet-4.5)..."
     echo -n "$ai_msg" >&2
     # Append to analysis output for redrawing
     if [[ -z "$analysis_output" ]]; then
@@ -509,7 +509,7 @@ ${COMMIT_STAT}
     local err_file=$(mktemp)
     
     # Run in background to allow for spinner
-    cursor-agent --model grok-code-fast-1 --print --trust "$full_prompt" > "$err_file" 2>&1 &
+    cursor-agent --model sonnet-4.5 --print -f "$full_prompt" > "$err_file" 2>&1 &
     local agent_pid=$!
     
     # Kill agent if user Ctrl+C's
@@ -523,6 +523,13 @@ ${COMMIT_STAT}
     
     local raw_output=$(cat "$err_file")
     rm "$prompt_file" "$err_file"
+    
+    # Check for provider errors
+    if echo "$raw_output" | grep -qi "Provider Error\|having trouble connecting"; then
+        echo "⚠️  AI Provider Error - Grok is temporarily unavailable. Please try again in a moment." >&2
+        echo ""
+        return 1
+    fi
     
     # Debug: Save raw output to temp file for inspection
     # echo "=== RAW AI OUTPUT ===" > /tmp/gitsense_debug.log
@@ -730,6 +737,14 @@ while true; do
     # Normal mode: Generate commit messages if needed
     if [[ "$refresh_needed" == "true" ]]; then
         raw_output=$(generate_messages "$current_feedback")
+        
+        # Check if generation failed (empty output or provider error)
+        if [[ -z "$raw_output" ]]; then
+            echo ""
+            echo "❌ Failed to generate commit messages. Please try again."
+            sleep 2
+            continue
+        fi
         
         # Parse output into array
         current_options=()
