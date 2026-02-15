@@ -468,20 +468,27 @@ ${RECENT_COMMITS}
     FILES CHANGED ($CHANGE_TYPE):
 ${COMMIT_STAT}
 
-    STRICT OUTPUT RULES:
-    1. Output ONLY 5 lines of text. No markdown.
-    2. Format: <type>: [${BRANCH_NAME}]: <description>
-    3. All 5 options should ideally have the SAME type (e.g., if it's a fix, all 5 should be 'fix').
-    4. Vary the phrasing (e.g., 'fix: handle null', 'fix: prevent crash', 'fix: add null check').
+    CRITICAL OUTPUT RULES:
+    1. Output EXACTLY 5 lines ONLY. NO extra text, NO explanations, NO markdown.
+    2. Each line must start with a type: feat, fix, chore, docs, refactor, style, perf, test, ci, or build
+    3. Format MUST BE: <type>: [${BRANCH_NAME}]: <description>
+    4. All 5 messages MUST use the SAME type (e.g., all 'fix' or all 'feat')
+    5. Vary ONLY the description/phrasing (e.g., 'fix: handle null', 'fix: prevent crash', etc.)
+    6. DO NOT include: numbering, bullets, markdown, explanations, or any extra text
+    
+    EXAMPLE OUTPUT (this is what you MUST produce):
+    feat: [BRANCH-123]: add user authentication
+    feat: [BRANCH-123]: implement login functionality
+    feat: [BRANCH-123]: add user credential validation
+    feat: [BRANCH-123]: create authentication service
+    feat: [BRANCH-123]: enable secure user login
 
     CONTENT GUIDELINES:
-    - Focus on the ACTUAL code changes in the diff.
-    - Use imperative mood ('add' not 'added').
-    - Do NOT hallucinate features not in the diff.
+    - Focus on the ACTUAL code changes in the diff below
+    - Use imperative mood ('add' not 'added')
+    - Be specific about what changed
+    - DO NOT hallucinate features not in the diff
 
-    TEMPLATE:
-    <type>: [${BRANCH_NAME}]: <phrasing option 1>
-    <type>: [${BRANCH_NAME}]: <phrasing option 2>
     "
 
     if [[ -n "$feedback" ]]; then
@@ -516,6 +523,12 @@ ${COMMIT_STAT}
     
     local raw_output=$(cat "$err_file")
     rm "$prompt_file" "$err_file"
+    
+    # Debug: Save raw output to temp file for inspection
+    # echo "=== RAW AI OUTPUT ===" > /tmp/gitsense_debug.log
+    # echo "$raw_output" >> /tmp/gitsense_debug.log
+    # echo "====================" >> /tmp/gitsense_debug.log
+    
     echo "$raw_output"
 }
 
@@ -725,19 +738,30 @@ while true; do
             clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g')
             # 2. Clean whitespace
             clean_line=$(echo "$clean_line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-            # 3. Remove numbering
-            clean_line=$(echo "$clean_line" | sed -E 's/^[0-9]+[\.\)\-]?[[:space:]]*//')
-            # 4. Remove markdown
-            clean_line=$(echo "$clean_line" | sed -E 's/`//g')
+            # 3. Remove numbering (more aggressive)
+            clean_line=$(echo "$clean_line" | sed -E 's/^[0-9]+[\.\)\-:][[:space:]]*//')
+            # 4. Remove markdown (backticks, asterisks, underscores)
+            clean_line=$(echo "$clean_line" | sed -E 's/`//g' | sed -E 's/\*\*//g' | sed -E 's/__//g')
+            # 5. Remove "Option X:" prefix if present
+            clean_line=$(echo "$clean_line" | sed -E 's/^[Oo]ption[[:space:]]+[0-9]+:[[:space:]]*//')
+            # 6. Skip empty lines
+            [[ -z "$clean_line" ]] && continue
 
-            # 5. STRICT FILTER
-            if echo "$clean_line" | grep -Eqi "^[[:space:]]*(feat|fix|chore|docs|refactor|style|perf|test|ci|build)(\(.*\))?:"; then
+            # 7. STRICT FILTER - only lines that start with conventional commit types
+            if echo "$clean_line" | grep -Eqi "^(feat|fix|chore|docs|refactor|style|perf|test|ci|build)(\(.*\))?:"; then
                 current_options+=("$clean_line")
             fi
         done <<< "$raw_output"
         
         if [[ ${#current_options[@]} -eq 0 ]]; then
-             current_options+=("Error: AI returned invalid format. Please try refining.")
+            # Debug: Show what we got from AI
+            echo "" >&2
+            echo "⚠️  Warning: AI returned unexpected format. Raw output:" >&2
+            echo "---" >&2
+            echo "$raw_output" | head -20 >&2
+            echo "---" >&2
+            echo "" >&2
+            current_options+=("Error: AI returned invalid format. Please try refining.")
         fi
         
         refresh_needed=false
