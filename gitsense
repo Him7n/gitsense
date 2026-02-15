@@ -136,7 +136,7 @@ $branch_diff
 "
 
     # Generate using cursor-agent
-    local pr_title=$(echo "$pr_title_prompt" | cursor-agent --model grok-code-fast-1 --print 2>/dev/null)
+    local pr_title=$(echo "$pr_title_prompt" | cursor-agent --model grok-code-fast-1 --print --trust 2>/dev/null)
 
     # Clean up output - extract just the title line
     pr_title=$(echo "$pr_title" | grep "^\[$ticket_id\]" | head -1)
@@ -304,7 +304,7 @@ $(echo "$branch_diff" | head -n 500)
 "
 
     # Generate using cursor-agent
-    local pr_output=$(echo "$pr_prompt" | cursor-agent --model grok-code-fast-1 --print 2>/dev/null)
+    local pr_output=$(echo "$pr_prompt" | cursor-agent --model grok-code-fast-1 --print --trust 2>/dev/null)
 
     # Clean up output
     pr_output=$(echo "$pr_output" | sed 's/```markdown//g' | sed 's/```//g')
@@ -423,7 +423,7 @@ Changes Made:
 $branch_diff
 "
 
-    local output=$(echo "$full_prompt" | cursor-agent --model grok-code-fast-1 --print 2>/dev/null)
+    local output=$(echo "$full_prompt" | cursor-agent --model grok-code-fast-1 --print --trust 2>/dev/null)
     echo "$output"
 }
 
@@ -509,7 +509,7 @@ ${COMMIT_STAT}
     local err_file=$(mktemp)
     
     # Run in background to allow for spinner
-    cursor-agent --model grok-code-fast-1 --print "$full_prompt" > "$err_file" 2>&1 &
+    cursor-agent --model grok-code-fast-1 --print --trust "$full_prompt" > "$err_file" 2>&1 &
     local agent_pid=$!
     
     # Kill agent if user Ctrl+C's
@@ -738,12 +738,15 @@ while true; do
             clean_line=$(echo "$line" | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g')
             # 2. Clean whitespace
             clean_line=$(echo "$clean_line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-            # 3. Remove numbering (more aggressive)
-            clean_line=$(echo "$clean_line" | sed -E 's/^[0-9]+[\.\)\-:][[:space:]]*//')
+            # 3. Remove numbering patterns like "1. ", "1) ", "1- ", "1: "
+            clean_line=$(echo "$clean_line" | sed -E 's/^[0-9]+\. *//')
+            clean_line=$(echo "$clean_line" | sed -E 's/^[0-9]+\) *//')
+            clean_line=$(echo "$clean_line" | sed -E 's/^[0-9]+- *//')
+            clean_line=$(echo "$clean_line" | sed -E 's/^[0-9]+: *//')
             # 4. Remove markdown (backticks, asterisks, underscores)
             clean_line=$(echo "$clean_line" | sed -E 's/`//g' | sed -E 's/\*\*//g' | sed -E 's/__//g')
             # 5. Remove "Option X:" prefix if present
-            clean_line=$(echo "$clean_line" | sed -E 's/^[Oo]ption[[:space:]]+[0-9]+:[[:space:]]*//')
+            clean_line=$(echo "$clean_line" | sed -E 's/^[Oo]ption +[0-9]+: *//')
             # 6. Skip empty lines
             [[ -z "$clean_line" ]] && continue
 
